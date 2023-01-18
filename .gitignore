@@ -2,3 +2,4 @@
 dist/
 /venv/
 mass-crc32c
+*.exe
