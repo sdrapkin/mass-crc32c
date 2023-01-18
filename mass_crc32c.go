@@ -20,8 +20,12 @@ var limiter chan struct{}
 var token struct{}
 var readSize int
 
-func printErr(a ...any) {
-	fmt.Fprintln(os.Stderr, a)
+func printErr(path string, err error, isDir bool) {
+	node_type := "file"
+	if isDir {
+		node_type = "dir"
+	}
+	fmt.Fprintf(os.Stderr, "%s error: '%s': %v\n", node_type, path, err)
 }
 
 func CRCReader(reader io.Reader) (string, error) {
@@ -49,12 +53,12 @@ func fileHandler(path string) error {
 	file, err := os.Open(path)
 	defer file.Close()
 	if err != nil {
-		printErr(err)
+		printErr(path, err, false)
 		return nil
 	}
 	crc, err := CRCReader(file)
 	if err != nil {
-		printErr(err)
+		printErr(path, err, false)
 		return nil
 	}
 	fmt.Printf("%s %s\n", crc, path)
@@ -63,7 +67,7 @@ func fileHandler(path string) error {
 
 func walkHandler(path string, info os.FileInfo, err error) error {
 	if err != nil {
-		printErr(err)
+		printErr(path, err, info.IsDir())
 		return nil
 	}
 	if info.IsDir() {
