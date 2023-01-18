@@ -94,7 +94,7 @@ func sanityCheck() {
 	calculatedChecksumBase64 := base64.StdEncoding.EncodeToString(buf)
 	if expectedCorrectChecksum != calculatedChecksumBase64 {
 		fmt.Fprintf(os.Stderr, "Sanity Check failed! Terminating.\n")
-		os.Exit(-1)
+		os.Exit(2)
 	}
 }
 
