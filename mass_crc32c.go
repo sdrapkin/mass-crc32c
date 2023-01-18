@@ -1,19 +1,17 @@
 package main
 
 import (
-    "encoding/base64"
-    "encoding/binary"
-    "flag"
-    "fmt"
-    "hash/crc32"
-    "io"
-    "log"
-    "os"
-    "path/filepath"
-    "runtime"
-    "sync"
-    "time"
-
+	"encoding/base64"
+	"encoding/binary"
+	"flag"
+	"fmt"
+	"hash/crc32"
+	"io"
+	"log"
+	"os"
+	"path/filepath"
+	"runtime"
+	"sync"
 )
 
 var wg sync.WaitGroup
@@ -21,6 +19,10 @@ var wg sync.WaitGroup
 var limiter chan struct{}
 var token struct{}
 var readSize int
+
+func printErr(a ...any) {
+	fmt.Fprintln(os.Stderr, a)
+}
 
 func CRCReader(reader io.Reader) (string, error) {
 	table := crc32.MakeTable(crc32.Castagnoli)
@@ -42,41 +44,40 @@ func CRCReader(reader io.Reader) (string, error) {
 }
 
 func fileHandler(path string) error {
-	defer wg.Done() // register that we finish a job at the end of the task
-	defer func() {<-limiter}() // pop a token out of the queue when the task is done
+	defer wg.Done()              // register that we finish a job at the end of the task
+	defer func() { <-limiter }() // pop a token out of the queue when the task is done
 	file, err := os.Open(path)
 	defer file.Close()
 	if err != nil {
-		fmt.Println(err)
+		printErr(err)
 		return nil
 	}
 	crc, err := CRCReader(file)
 	if err != nil {
-		fmt.Println(err)
+		printErr(err)
 		return nil
 	}
-	time.Sleep(0)
 	fmt.Printf("%s %s\n", crc, path)
 	return nil
 }
 
 func walkHandler(path string, info os.FileInfo, err error) error {
 	if err != nil {
-		fmt.Println(err)
+		printErr(err)
 		return nil
 	}
 	if info.IsDir() {
-		fmt.Printf("entering dir: %s\n", path)
+		fmt.Fprintf(os.Stderr, "entering dir: %s\n", path)
 		return nil
 	}
 	limiter <- token // add a token to the queue (blocking when queue is full)
-	wg.Add(1) // register that we start a new job
+	wg.Add(1)        // register that we start a new job
 	go fileHandler(path)
 	return nil
 }
 
 func printUsage() {
-	fmt.Fprintf(os.Stderr, "Usage of %s: [options] [path ...]\n\nOptions:\n", os.Args[0])
+	fmt.Fprintf(os.Stderr, "Usage of %s: [options] path [path ...]\n\nOptions:\n", os.Args[0])
 	flag.PrintDefaults()
 }
 
@@ -88,10 +89,12 @@ func main() {
 
 	flag.Parse()
 	if flag.NArg() == 0 {
-		log.Fatal("missing paths")
+		fmt.Fprintln(os.Stderr, "error: missing paths")
+		printUsage()
+		os.Exit(1)
 	}
 
-	runtime.GOMAXPROCS(*p) // limit number of kernel threads (CPUs used)
+	runtime.GOMAXPROCS(*p)            // limit number of kernel threads (CPUs used)
 	limiter = make(chan struct{}, *j) // use a channel with a size to limit the number of parallel jobs
 	readSize = *r
 	for _, arg := range flag.Args() {
@@ -102,4 +105,3 @@ func main() {
 	}
 	wg.Wait()
 }
-
