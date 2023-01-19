@@ -1,5 +1,4 @@
-
-dist/
-/venv/
-mass-crc32c
+.git/
+.vs/
 *.exe
+*.txt
