@@ -10,11 +10,13 @@ Usage of mass-crc32c: [options] [path ...]
 
 Options:
   -j int
-    	# of parallel reads (default 1)
+        # of parallel reads (default <#CPU>*4)
+  -l int
+        size of list ahead queue (default <#CPU>*16)
   -p int
-    	# of cpu used (default 1)
+        # of cpu used (default <#CPU>)
   -s int
-    	size of reads in Mbytes (default 8)
+        size of reads in kbytes (default 1024)
 ```
 
 # Release
