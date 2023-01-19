@@ -10,35 +10,35 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"time"
 )
 
 var wg sync.WaitGroup
-
-var limiter chan struct{}
-var token struct{}
-var readSize int
+var pathQueue chan string
 var global_crc32cTable *crc32.Table
 
-func printErr(path string, err error, isDir bool) {
-	node_type := "file"
-	if isDir {
-		node_type = "dir"
-	}
-	fmt.Fprintf(os.Stderr, "%s error: '%s': %v\n", node_type, path, err)
+func printErr(path string, err error) {
+	fmt.Fprintf(os.Stderr, "error: '%s': %v\n", path, err)
 }
 
-func CRCReader(reader io.Reader) (string, error) {
+func CRCReader(path string, buffer *[]byte) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		printErr(path, err)
+		return "", err
+	}
+	defer file.Close()
+
 	checksum := uint32(0)
-	buf := make([]byte, 1024*1024*readSize)
 	for {
-		switch n, err := reader.Read(buf); err {
+		switch n, err := file.Read(*buffer); err {
 		case nil:
-			checksum = crc32.Update(checksum, global_crc32cTable, buf[:n])
+			checksum = crc32.Update(checksum, global_crc32cTable, (*buffer)[:n])
 		case io.EOF:
-			binary.BigEndian.PutUint32(buf, checksum)
-			str := base64.StdEncoding.EncodeToString(buf[:4])
+			binary.BigEndian.PutUint32(*buffer, checksum)
+			str := base64.StdEncoding.EncodeToString((*buffer)[:4])
 			return str, nil
 		default:
 			return "", err
@@ -46,42 +46,41 @@ func CRCReader(reader io.Reader) (string, error) {
 	}
 }
 
-func fileHandler(path string) error {
-	defer wg.Done()              // register that we finish a job at the end of the task
-	defer func() { <-limiter }() // pop a token out of the queue when the task is done
-	file, err := os.Open(path)
-	defer func() { file.Close() }()
-	if err != nil {
-		printErr(path, err, false)
-		return nil
+func fileHandler(bufferSizeKB int) error {
+	wg.Add(1)
+	defer wg.Done()
+	buffer := make([]byte, 1024*bufferSizeKB)
+	for path := range pathQueue { // consume the messages in the queue
+
+		crc, err := CRCReader(path, &buffer)
+		if err != nil {
+			printErr(path, err)
+			continue
+		}
+		fmt.Printf("%s %s\n", crc, path)
 	}
-	crc, err := CRCReader(file)
-	if err != nil {
-		printErr(path, err, false)
-		return nil
-	}
-	fmt.Printf("%s %s\n", crc, path)
 	return nil
 }
 
 func walkHandler(path string, info os.FileInfo, err error) error {
 	if err != nil {
-		printErr(path, err, info.IsDir())
+		nodeType := "file"
+		if info.IsDir() {
+			nodeType = "dir"
+		}
+		fmt.Fprintf(os.Stderr, "%s error: '%s': %v\n", nodeType, path, err)
 		return nil
 	}
 	if info.IsDir() {
 		fmt.Fprintf(os.Stderr, "entering dir: %s\n", path)
 		return nil
 	}
-	limiter <- token // add a token to the queue (blocking when queue is full)
-	wg.Add(1)        // register that we start a new job
-	go fileHandler(path)
+	if !info.Mode().IsRegular() {
+		fmt.Fprintf(os.Stderr, "ignoring: %s\n", path)
+		return nil
+	}
+	pathQueue <- path // add a path message to the queue (blocking when queue is full)
 	return nil
-}
-
-func printUsage() {
-	fmt.Fprintf(os.Stderr, "Usage of %s: [options] path [path ...]\n\nOptions:\n", os.Args[0])
-	flag.PrintDefaults()
 }
 
 func sanityCheck() {
@@ -98,11 +97,16 @@ func sanityCheck() {
 	}
 }
 
+func printUsage() {
+	fmt.Fprintf(os.Stderr, "Usage of %s: [options] path [path ...]\n\nOptions:\n", os.Args[0])
+	flag.PrintDefaults()
+}
+
 func main() {
-	start := time.Now()
-	p := flag.Int("p", 1, "# of cpu used")
-	j := flag.Int("j", 1, "# of parallel reads")
-	s := flag.Int("s", 8, "size of reads in Mbytes")
+	p := flag.Int("p", runtime.NumCPU(), "# of cpu used")
+	j := flag.Int("j", runtime.NumCPU()*4, "# of parallel reads")
+	l := flag.Int("l", runtime.NumCPU()*4*4, "size of list ahead queue")
+	s := flag.Int("s", 1024, "size of reads in kbytes")
 	flag.Usage = printUsage
 
 	flag.Parse()
@@ -111,22 +115,28 @@ func main() {
 		printUsage()
 		os.Exit(1)
 	}
-
-	fmt.Fprintf(os.Stderr, "Flags (p j s): %d %d %d\n", *p, *j, *s)
+	fmt.Fprintf(os.Stderr, "Flags: [p=%d j=%d l=%d s=%d)]\n", *p, *j, *l, *s)
 
 	global_crc32cTable = crc32.MakeTable(crc32.Castagnoli)
-
 	sanityCheck()
 
-	//runtime.GOMAXPROCS(*p)            // limit number of kernel threads (CPUs used)
-	limiter = make(chan struct{}, *j) // use a channel with a size to limit the number of parallel jobs
-	readSize = *s
+	runtime.GOMAXPROCS(*p)            // limit number of kernel threads (CPUs used)
+	pathQueue = make(chan string, *l) // use a channel with a size to limit the number of list ahead path
+
+	start := time.Now()
+
+	// create the coroutines
+	for i := 1; i < *j; i++ {
+		go fileHandler(*s)
+	}
 	for _, arg := range flag.Args() {
 		err := filepath.Walk(arg, walkHandler)
 		if err != nil {
 			log.Fatal(err)
 		}
 	}
+	close(pathQueue)
 	wg.Wait()
+
 	fmt.Fprintln(os.Stderr, time.Since(start))
 }
