@@ -1,3 +1,3 @@
-module github.com/thomascoquelin/mass-crc32c
+module github.com/sdrapkin/mass-crc32c
 
 go 1.19

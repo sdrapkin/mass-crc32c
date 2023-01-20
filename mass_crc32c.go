@@ -47,7 +47,7 @@ func CRCReader(path string, fileInfoSize int64, buffer *[]byte) (string, error) 
 			processedSize += int64(n)
 		case io.EOF:
 			binary.BigEndian.PutUint32(*buffer, checksum)
-			str := base64.StdEncoding.EncodeToString((*buffer)[:4])
+			str := base64.StdEncoding.EncodeToString((*buffer)[:crc32.Size])
 
 			if fileInfoSize != processedSize {
 				return "", errors.New("fileInfoSize != processedSize")
@@ -101,7 +101,7 @@ func sanityCheck() {
 	const expectedCorrectChecksum = "C7DdPQ=="
 
 	calculatedChecksum := crc32.Update(uint32(0), global_crc32cTable, []byte(data))
-	buf := make([]byte, 4)
+	buf := make([]byte, crc32.Size)
 	binary.BigEndian.PutUint32(buf, calculatedChecksum)
 	calculatedChecksumBase64 := base64.StdEncoding.EncodeToString(buf)
 	if expectedCorrectChecksum != calculatedChecksumBase64 {
