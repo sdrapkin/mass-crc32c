@@ -1,7 +1,5 @@
 # mass-crc32c
-Computes Google GCS compatible CRC32C of local files with configurable multithreading and parallel file reads 
-
-The initial usecase was to compute an inventory with CRC32C of a billion files on a local storage prior to upload to GCS.
+Computes Google GCS compatible [CRC32C](https://cloud.google.com/storage/docs/gsutil/addlhelp/CRC32CandInstallingcrcmod) of local files with configurable multithreading and parallel file reads. The usecase was to compute CRC32C for 1+ billion locally stored files prior to GCS upload.
 
 # Usage
 ```
