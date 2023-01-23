@@ -16,15 +16,16 @@ import (
 	"time"
 ) //import
 
-var wg sync.WaitGroup
-
 type job struct {
 	path string
 	size int64
 } //job struct
 
-var jobQueue chan job
-var global_crc32cTable *crc32.Table
+var (
+	jobQueue      chan *job
+	g_crc32cTable *crc32.Table
+	wg            sync.WaitGroup
+)
 
 func printErr(path string, err error) {
 	fmt.Fprintf(os.Stderr, "error: '%s': %v\n", path, err)
@@ -43,7 +44,7 @@ func CRCReader(path string, fileInfoSize int64, buffer *[]byte) (string, error) 
 	for {
 		switch n, err := file.Read(*buffer); err {
 		case nil:
-			checksum = crc32.Update(checksum, global_crc32cTable, (*buffer)[:n])
+			checksum = crc32.Update(checksum, g_crc32cTable, (*buffer)[:n])
 			processedSize += int64(n)
 		case io.EOF:
 			binary.BigEndian.PutUint32(*buffer, checksum)
@@ -61,7 +62,7 @@ func CRCReader(path string, fileInfoSize int64, buffer *[]byte) (string, error) 
 
 func fileHandler(bufferSizeKB int) error {
 	wg.Add(1)
-	defer wg.Done()
+	defer wg.Add(-1)
 	buffer := make([]byte, 1024*bufferSizeKB)
 	for work := range jobQueue { // consume the messages in the queue
 
@@ -92,7 +93,7 @@ func enqueueJob(path string, info os.FileInfo, err error) error {
 		fmt.Fprintf(os.Stderr, "ignoring: %s\n", path)
 		return nil
 	}
-	jobQueue <- job{path: path, size: info.Size()} // add new file job to the queue (blocking when queue is full)
+	jobQueue <- &job{path: path, size: info.Size()} // add new file job to the queue (blocking when queue is full)
 	return nil
 } //enqueueJob()
 
@@ -100,7 +101,7 @@ func sanityCheck() {
 	const data = "861844d6704e8573fec34d967e20bcfef3d424cf48be04e6dc08f2bd58c729743371015ead891cc3cf1c9d34b49264b510751b1ff9e537937bc46b5d6ff4ecc8" // sha512("Hello World!")
 	const expectedCorrectChecksum = "C7DdPQ=="
 
-	calculatedChecksum := crc32.Update(uint32(0), global_crc32cTable, []byte(data))
+	calculatedChecksum := crc32.Update(uint32(0), g_crc32cTable, []byte(data))
 	buf := make([]byte, crc32.Size)
 	binary.BigEndian.PutUint32(buf, calculatedChecksum)
 	calculatedChecksumBase64 := base64.StdEncoding.EncodeToString(buf)
@@ -130,16 +131,16 @@ func main() {
 	}
 	fmt.Fprintf(os.Stderr, "Flags: [p=%d j=%d l=%d s=%d)]\n", *p, *j, *l, *s)
 
-	global_crc32cTable = crc32.MakeTable(crc32.Castagnoli)
+	g_crc32cTable = crc32.MakeTable(crc32.Castagnoli)
 	sanityCheck()
 
-	runtime.GOMAXPROCS(*p)        // limit number of kernel threads (CPUs used)
-	jobQueue = make(chan job, *l) // use a channel with a size to limit the number of list ahead path
+	runtime.GOMAXPROCS(*p)         // limit number of kernel threads (CPUs used)
+	jobQueue = make(chan *job, *l) // use a channel with a size to limit the number of list ahead path
 
 	start := time.Now()
 
 	// create the coroutines
-	for i := 1; i < *j; i++ {
+	for i := 0; i < *j; i++ {
 		go fileHandler(*s)
 	}
 	for _, arg := range flag.Args() {
