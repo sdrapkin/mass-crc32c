@@ -22,9 +22,9 @@ type job struct {
 } //job struct
 
 var (
-	jobQueue      chan *job
+	g_jobQueue    chan *job
 	g_crc32cTable *crc32.Table
-	wg            sync.WaitGroup
+	g_waitGroup   sync.WaitGroup
 )
 
 func printErr(path string, err error) {
@@ -56,15 +56,15 @@ func CRCReader(path string, fileInfoSize int64, buffer *[]byte) (string, error) 
 			return str, nil
 		default:
 			return "", err
-		}
-	}
+		} //switch
+	} //for
 } //CRCReader()
 
 func fileHandler(bufferSizeKB int) error {
-	wg.Add(1)
-	defer wg.Add(-1)
+	g_waitGroup.Add(1)
+	defer g_waitGroup.Add(-1)
 	buffer := make([]byte, 1024*bufferSizeKB)
-	for work := range jobQueue { // consume the messages in the queue
+	for work := range g_jobQueue { // consume the messages in the queue
 
 		crc, err := CRCReader(work.path, work.size, &buffer)
 		if err != nil {
@@ -72,7 +72,7 @@ func fileHandler(bufferSizeKB int) error {
 			continue
 		}
 		fmt.Printf("%s %016x %s\n", crc, work.size, work.path)
-	}
+	} //for
 	return nil
 } //fileHandler()
 
@@ -93,7 +93,7 @@ func enqueueJob(path string, info os.FileInfo, err error) error {
 		fmt.Fprintf(os.Stderr, "ignoring: %s\n", path)
 		return nil
 	}
-	jobQueue <- &job{path: path, size: info.Size()} // add new file job to the queue (blocking when queue is full)
+	g_jobQueue <- &job{path: path, size: info.Size()} // add new file job to the queue (blocking when queue is full)
 	return nil
 } //enqueueJob()
 
@@ -134,23 +134,25 @@ func main() {
 	g_crc32cTable = crc32.MakeTable(crc32.Castagnoli)
 	sanityCheck()
 
-	runtime.GOMAXPROCS(*p)         // limit number of kernel threads (CPUs used)
-	jobQueue = make(chan *job, *l) // use a channel with a size to limit the number of list ahead path
+	runtime.GOMAXPROCS(*p)           // limit number of kernel threads (CPUs used)
+	g_jobQueue = make(chan *job, *l) // use a channel with a size to limit the number of list ahead path
 
 	start := time.Now()
 
 	// create the coroutines
-	for i := 0; i < *j; i++ {
-		go fileHandler(*s)
+	for i, bufferSizeKB := 0, *s; i < *j; i++ {
+		go fileHandler(bufferSizeKB)
 	}
+
+	// enqueue jobs
 	for _, arg := range flag.Args() {
 		err := filepath.Walk(arg, enqueueJob)
 		if err != nil {
 			log.Fatal(err)
 		}
-	}
-	close(jobQueue)
-	wg.Wait()
+	} //for
+	close(g_jobQueue) // safe to close, since all jobs have already been channel-received by now
 
+	g_waitGroup.Wait()
 	fmt.Fprintln(os.Stderr, time.Since(start))
 } //main()
