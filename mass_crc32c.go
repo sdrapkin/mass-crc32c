@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/base64"
-	"encoding/binary"
 	"errors"
 	"flag"
 	"fmt"
@@ -41,13 +40,23 @@ func CRCReader(path string, fileInfoSize int64, buffer *[]byte) (string, error) 
 
 	checksum := uint32(0)
 	processedSize := int64(0)
+
+	bufferSize := len(*buffer)
+
 	for {
 		switch n, err := file.Read(*buffer); err {
 		case nil:
-			checksum = crc32.Update(checksum, g_crc32cTable, (*buffer)[:n])
+			if n == bufferSize {
+				checksum = crc32.Update(checksum, g_crc32cTable, *buffer)
+			} else {
+				checksum = crc32.Update(checksum, g_crc32cTable, (*buffer)[:n])
+			}
 			processedSize += int64(n)
 		case io.EOF:
-			binary.BigEndian.PutUint32(*buffer, checksum)
+			(*buffer)[0] = byte(checksum >> 24)
+			(*buffer)[1] = byte(checksum >> 16)
+			(*buffer)[2] = byte(checksum >> 8)
+			(*buffer)[3] = byte(checksum)
 			str := base64.StdEncoding.EncodeToString((*buffer)[:crc32.Size])
 
 			if fileInfoSize != processedSize {
@@ -55,7 +64,7 @@ func CRCReader(path string, fileInfoSize int64, buffer *[]byte) (string, error) 
 			}
 			return str, nil
 		default:
-			return "", err
+			return "ERROR!", err
 		} //switch
 	} //for
 } //CRCReader()
@@ -103,7 +112,12 @@ func sanityCheck() {
 
 	calculatedChecksum := crc32.Update(uint32(0), g_crc32cTable, []byte(data))
 	buf := make([]byte, crc32.Size)
-	binary.BigEndian.PutUint32(buf, calculatedChecksum)
+
+	buf[0] = byte(calculatedChecksum >> 24)
+	buf[1] = byte(calculatedChecksum >> 16)
+	buf[2] = byte(calculatedChecksum >> 8)
+	buf[3] = byte(calculatedChecksum)
+
 	calculatedChecksumBase64 := base64.StdEncoding.EncodeToString(buf)
 	if expectedCorrectChecksum != calculatedChecksumBase64 {
 		fmt.Fprintf(os.Stderr, "Sanity Check failed! Terminating.\n")
