@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"flag"
 	"fmt"
@@ -45,25 +46,24 @@ func CRCReader(path string, fileInfoSize int64, buffer *[]byte) (string, error) 
 
 	for {
 		switch n, err := file.Read(*buffer); err {
-		case nil:
+		case nil: // runs many times
 			if n == bufferSize {
+				processedSize += int64(bufferSize)
 				checksum = crc32.Update(checksum, g_crc32cTable, *buffer)
 			} else {
+				processedSize += int64(n)
 				checksum = crc32.Update(checksum, g_crc32cTable, (*buffer)[:n])
 			}
-			processedSize += int64(n)
-		case io.EOF:
-			(*buffer)[0] = byte(checksum >> 24)
-			(*buffer)[1] = byte(checksum >> 16)
-			(*buffer)[2] = byte(checksum >> 8)
-			(*buffer)[3] = byte(checksum)
-			str := base64.StdEncoding.EncodeToString((*buffer)[:crc32.Size])
+		case io.EOF: // runs once
+			bufferSlice4 := (*buffer)[:4]
+			binary.BigEndian.PutUint32(bufferSlice4, checksum)
+			str := base64.StdEncoding.EncodeToString(bufferSlice4)
 
 			if fileInfoSize != processedSize {
 				return "", errors.New("fileInfoSize != processedSize")
 			}
 			return str, nil
-		default:
+		default: // should never run
 			return "ERROR!", err
 		} //switch
 	} //for
@@ -87,9 +87,11 @@ func fileHandler(bufferSizeKB int) error {
 
 func enqueueJob(path string, info os.FileInfo, err error) error {
 	if err != nil {
-		nodeType := "file"
+		var nodeType string
 		if info.IsDir() {
 			nodeType = "dir"
+		} else {
+			nodeType = "file:"
 		}
 		fmt.Fprintf(os.Stderr, "%s error: '%s': %v\n", nodeType, path, err)
 		return nil
@@ -111,16 +113,12 @@ func sanityCheck() {
 	const expectedCorrectChecksum = "C7DdPQ=="
 
 	calculatedChecksum := crc32.Update(uint32(0), g_crc32cTable, []byte(data))
-	buf := make([]byte, crc32.Size)
-
-	buf[0] = byte(calculatedChecksum >> 24)
-	buf[1] = byte(calculatedChecksum >> 16)
-	buf[2] = byte(calculatedChecksum >> 8)
-	buf[3] = byte(calculatedChecksum)
-
-	calculatedChecksumBase64 := base64.StdEncoding.EncodeToString(buf)
+	slice4 := make([]byte, 4)
+	binary.BigEndian.PutUint32(slice4, calculatedChecksum)
+	calculatedChecksumBase64 := base64.StdEncoding.EncodeToString(slice4)
 	if expectedCorrectChecksum != calculatedChecksumBase64 {
-		fmt.Fprintf(os.Stderr, "Sanity Check failed! Terminating.\n")
+		fmt.Fprintf(os.Stderr, "Sanity Check failed! [expected: %s, calculated: %s]. Terminating.\n",
+			expectedCorrectChecksum, calculatedChecksumBase64)
 		os.Exit(2)
 	}
 } //sanityCheck()
@@ -131,9 +129,10 @@ func printUsage() {
 } //printUsage()
 
 func main() {
-	p := flag.Int("p", runtime.NumCPU(), "# of cpu used")
-	j := flag.Int("j", runtime.NumCPU()*4, "# of parallel reads")
-	l := flag.Int("l", runtime.NumCPU()*4*4, "size of list ahead queue")
+	numCPU := runtime.NumCPU()
+	p := flag.Int("p", numCPU, "# of cpu used")
+	j := flag.Int("j", numCPU*4, "# of parallel reads")
+	l := flag.Int("l", numCPU*4*4, "size of list ahead queue")
 	s := flag.Int("s", 1024, "size of reads in kbytes")
 	flag.Usage = printUsage
 
