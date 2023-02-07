@@ -10,7 +10,7 @@ Options:
   -j int
         # of parallel reads (default <#CPU>*4)
   -l int
-        size of list ahead queue (default <#CPU>*16)
+        size of list ahead queue (default <#CPU>*4)
   -p int
         # of cpu used (default <#CPU>)
   -s int

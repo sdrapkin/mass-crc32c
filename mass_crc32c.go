@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
@@ -31,10 +32,10 @@ func printErr(path string, err error) {
 	fmt.Fprintf(os.Stderr, "error: '%s': %v\n", path, err)
 } //printErr()
 
-func CRCReader(path string, fileInfoSize int64, buffer *[]byte) (string, error) {
-	file, err := os.Open(path)
+func CRCReader(work *job, buffer []byte) (string, error) {
+	file, err := os.Open(work.path)
 	if err != nil {
-		printErr(path, err)
+		printErr(work.path, err)
 		return "", err
 	}
 	defer file.Close()
@@ -42,46 +43,63 @@ func CRCReader(path string, fileInfoSize int64, buffer *[]byte) (string, error) 
 	checksum := uint32(0)
 	processedSize := int64(0)
 
-	bufferSize := len(*buffer)
+	bufferSize := len(buffer)
 
 	for {
-		switch n, err := file.Read(*buffer); err {
+		switch n, err := file.Read(buffer); err {
 		case nil: // runs many times
 			if n == bufferSize {
 				processedSize += int64(bufferSize)
-				checksum = crc32.Update(checksum, g_crc32cTable, *buffer)
+				checksum = crc32.Update(checksum, g_crc32cTable, buffer)
 			} else {
 				processedSize += int64(n)
-				checksum = crc32.Update(checksum, g_crc32cTable, (*buffer)[:n])
+				checksum = crc32.Update(checksum, g_crc32cTable, buffer[:n])
 			}
 		case io.EOF: // runs once
-			bufferSlice4 := (*buffer)[:4]
-			binary.BigEndian.PutUint32(bufferSlice4, checksum)
-			str := base64.StdEncoding.EncodeToString(bufferSlice4)
-
-			if fileInfoSize != processedSize {
+			if work.size != processedSize {
 				return "", errors.New("fileInfoSize != processedSize")
 			}
-			return str, nil
+
+			const checksumByteSize = crc32.Size
+			const checksumBase64Size = ((checksumByteSize-1)/3)*4 + 4
+
+			binary.BigEndian.PutUint32(buffer[0:checksumByteSize], checksum)
+			base64.StdEncoding.Encode(buffer[checksumByteSize:checksumByteSize+checksumBase64Size], buffer[0:checksumByteSize])
+
+			return string(buffer[checksumByteSize : checksumByteSize+checksumBase64Size]), nil
 		default: // should never run
 			return "ERROR!", err
 		} //switch
 	} //for
 } //CRCReader()
 
-func fileHandler(bufferSizeKB int) error {
+func fileHandler(jobId int, bufferSizeKB int) error {
 	g_waitGroup.Add(1)
 	defer g_waitGroup.Add(-1)
-	buffer := make([]byte, 1024*bufferSizeKB)
+
+	fileReadBuffer := make([]byte, 1024*bufferSizeKB)
+	var stdoutBuffer bytes.Buffer
+	var batchCounter = byte(0) // batches of 256
+
 	for work := range g_jobQueue { // consume the messages in the queue
 
-		crc, err := CRCReader(work.path, work.size, &buffer)
+		crc, err := CRCReader(work, fileReadBuffer)
 		if err != nil {
 			printErr(work.path, err)
 			continue
 		}
-		fmt.Printf("%s %016x %s\n", crc, work.size, work.path)
+		batchCounter++
+		fmt.Fprintf(&stdoutBuffer, "%s %016x %s\n", crc, work.size, work.path)
+
+		if batchCounter == 0 { // byte wrap-around
+			os.Stdout.Write(stdoutBuffer.Bytes())
+			stdoutBuffer.Reset()
+		}
 	} //for
+
+	if batchCounter > 0 {
+		os.Stdout.Write(stdoutBuffer.Bytes())
+	}
 	return nil
 } //fileHandler()
 
@@ -89,7 +107,7 @@ func enqueueJob(path string, info os.FileInfo, err error) error {
 	if err != nil {
 		var nodeType string
 		if info.IsDir() {
-			nodeType = "dir"
+			nodeType = "dir:"
 		} else {
 			nodeType = "file:"
 		}
@@ -97,7 +115,7 @@ func enqueueJob(path string, info os.FileInfo, err error) error {
 		return nil
 	}
 	if info.IsDir() {
-		fmt.Fprintf(os.Stderr, "entering dir: %s\n", path)
+		os.Stderr.Write([]byte(fmt.Sprintf("entering dir: %s\n", path)))
 		return nil
 	}
 	if !info.Mode().IsRegular() {
@@ -132,7 +150,7 @@ func main() {
 	numCPU := runtime.NumCPU()
 	p := flag.Int("p", numCPU, "# of cpu used")
 	j := flag.Int("j", numCPU*4, "# of parallel reads")
-	l := flag.Int("l", numCPU*4*4, "size of list ahead queue")
+	l := flag.Int("l", *j, "size of list ahead queue")
 	s := flag.Int("s", 1024, "size of reads in kbytes")
 	flag.Usage = printUsage
 
@@ -153,8 +171,8 @@ func main() {
 	start := time.Now()
 
 	// create the coroutines
-	for i, bufferSizeKB := 0, *s; i < *j; i++ {
-		go fileHandler(bufferSizeKB)
+	for jobId, bufferSizeKB := 0, *s; jobId < *j; jobId++ {
+		go fileHandler(jobId, bufferSizeKB)
 	}
 
 	// enqueue jobs
