@@ -104,9 +104,11 @@ func fileHandler(jobId int, bufferSizeKB int) error {
 } //fileHandler()
 
 func enqueueJob(path string, info os.FileInfo, err error) error {
+	fileMode := info.Mode()
+
 	if err != nil {
 		var nodeType string
-		if info.IsDir() {
+		if fileMode.IsDir() {
 			nodeType = "dir:"
 		} else {
 			nodeType = "file:"
@@ -114,17 +116,22 @@ func enqueueJob(path string, info os.FileInfo, err error) error {
 		fmt.Fprintf(os.Stderr, "%s error: '%s': %v\n", nodeType, path, err)
 		return nil
 	}
-	if info.IsDir() {
+	if fileMode.IsDir() {
 		os.Stderr.Write([]byte(fmt.Sprintf("entering dir: %s\n", path)))
 		return nil
 	}
-	if !info.Mode().IsRegular() {
+	if !fileMode.IsRegular() {
 		fmt.Fprintf(os.Stderr, "ignoring: %s\n", path)
 		return nil
 	}
 	g_jobQueue <- &job{path: path, size: info.Size()} // add new file job to the queue (blocking when queue is full)
 	return nil
 } //enqueueJob()
+
+func init() {
+	g_crc32cTable = crc32.MakeTable(crc32.Castagnoli)
+	sanityCheck()
+}
 
 func sanityCheck() {
 	const data = "861844d6704e8573fec34d967e20bcfef3d424cf48be04e6dc08f2bd58c729743371015ead891cc3cf1c9d34b49264b510751b1ff9e537937bc46b5d6ff4ecc8" // sha512("Hello World!")
@@ -161,9 +168,6 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Fprintf(os.Stderr, "Flags: [p=%d j=%d l=%d s=%d)]\n", *p, *j, *l, *s)
-
-	g_crc32cTable = crc32.MakeTable(crc32.Castagnoli)
-	sanityCheck()
 
 	runtime.GOMAXPROCS(*p)           // limit number of kernel threads (CPUs used)
 	g_jobQueue = make(chan *job, *l) // use a channel with a size to limit the number of list ahead path
