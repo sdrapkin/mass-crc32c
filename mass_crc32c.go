@@ -154,11 +154,18 @@ func printUsage() {
 } //printUsage()
 
 func main() {
+	var cpuCount int
+	var workerCount int
+	var bufferSizeKB int
+	var listAheadSize int
+
+	const DEFAULT_BUFFER_SIZE_KB = 1024
 	numCPU := runtime.NumCPU()
-	p := flag.Int("p", numCPU, "# of cpu used")
-	j := flag.Int("j", numCPU*4, "# of parallel reads")
-	l := flag.Int("l", *j, "size of list ahead queue")
-	s := flag.Int("s", 1024, "size of reads in kbytes")
+
+	flag.IntVar(&cpuCount, "p", numCPU, "# of cpu used")
+	flag.IntVar(&workerCount, "j", numCPU*4, "# of parallel reads")
+	flag.IntVar(&listAheadSize, "l", workerCount, "size of list ahead queue")
+	flag.IntVar(&bufferSizeKB, "s", DEFAULT_BUFFER_SIZE_KB, "size of reads in kbytes")
 	flag.Usage = printUsage
 
 	flag.Parse()
@@ -167,15 +174,15 @@ func main() {
 		printUsage()
 		os.Exit(1)
 	}
-	fmt.Fprintf(os.Stderr, "Flags: [p=%d j=%d l=%d s=%d)]\n", *p, *j, *l, *s)
+	fmt.Fprintf(os.Stderr, "Flags: [p=%d j=%d l=%d s=%d)]\n", cpuCount, workerCount, listAheadSize, bufferSizeKB)
 
-	runtime.GOMAXPROCS(*p)           // limit number of kernel threads (CPUs used)
-	g_jobQueue = make(chan *job, *l) // use a channel with a size to limit the number of list ahead path
+	runtime.GOMAXPROCS(cpuCount)                // limit number of kernel threads (CPUs used)
+	g_jobQueue = make(chan *job, listAheadSize) // use a channel with a size to limit the number of list ahead path
 
 	start := time.Now()
 
 	// create the coroutines
-	for jobId, bufferSizeKB := 0, *s; jobId < *j; jobId++ {
+	for jobId := 0; jobId < workerCount; jobId++ {
 		go fileHandler(jobId, bufferSizeKB)
 	}
 
