@@ -10,17 +10,26 @@ import (
 	"hash/crc32"
 	"io"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sync"
 	"time"
+
+	"golang.org/x/text/language"
+	"golang.org/x/text/message"
 ) //import
 
 type job struct {
 	path string
 	size int64
 } //job struct
+
+type jobStat struct {
+	bytesProcessed int64
+	filesProcessed int64
+}
 
 var (
 	g_jobQueue    chan *job
@@ -73,13 +82,15 @@ func CRCReader(work *job, buffer []byte) (string, error) {
 	} //for
 } //CRCReader()
 
-func fileHandler(jobId int, bufferSizeKB int) error {
+func fileHandler(jobId int, bufferSizeKB int, jobStats []jobStat) error {
 	g_waitGroup.Add(1)
 	defer g_waitGroup.Add(-1)
 
 	fileReadBuffer := make([]byte, 1024*bufferSizeKB)
 	var stdoutBuffer bytes.Buffer
-	var batchCounter = byte(0) // batches of 256
+	batchCounter := uint8(0) // batches of 256
+
+	localJobStat := jobStat{}
 
 	for work := range g_jobQueue { // consume the messages in the queue
 
@@ -89,17 +100,22 @@ func fileHandler(jobId int, bufferSizeKB int) error {
 			continue
 		}
 		batchCounter++
+		localJobStat.bytesProcessed += work.size
 		fmt.Fprintf(&stdoutBuffer, "%s %016x %s\n", crc, work.size, work.path)
 
 		if batchCounter == 0 { // byte wrap-around
 			os.Stdout.Write(stdoutBuffer.Bytes())
 			stdoutBuffer.Reset()
+			localJobStat.filesProcessed += (math.MaxUint8 + 1)
 		}
 	} //for
 
 	if batchCounter > 0 {
 		os.Stdout.Write(stdoutBuffer.Bytes())
+		localJobStat.filesProcessed += int64(batchCounter)
 	}
+
+	jobStats[jobId] = localJobStat
 	return nil
 } //fileHandler()
 
@@ -179,11 +195,13 @@ func main() {
 	runtime.GOMAXPROCS(cpuCount)                // limit number of kernel threads (CPUs used)
 	g_jobQueue = make(chan *job, listAheadSize) // use a channel with a size to limit the number of list ahead path
 
+	jobStats := make([]jobStat, workerCount)
+
 	start := time.Now()
 
 	// create the coroutines
 	for jobId := 0; jobId < workerCount; jobId++ {
-		go fileHandler(jobId, bufferSizeKB)
+		go fileHandler(jobId, bufferSizeKB, jobStats)
 	}
 
 	// enqueue jobs
@@ -196,5 +214,16 @@ func main() {
 	close(g_jobQueue) // safe to close, since all jobs have already been channel-received by now
 
 	g_waitGroup.Wait()
-	fmt.Fprintln(os.Stderr, time.Since(start))
+	duration := time.Since(start)
+
+	var totalFilesProcessed, totalBytesProcessed int64
+	for _, item := range jobStats {
+		totalFilesProcessed += (item.filesProcessed)
+		totalBytesProcessed += (item.bytesProcessed)
+	}
+	var mbPerSecond float64 = (float64(totalBytesProcessed) / (1024 * 1024)) / duration.Seconds()
+	printer := message.NewPrinter(language.English)
+	printer.Fprintf(os.Stderr, "[Duration: %v] [Files processed: %v] [Bytes processed: %v] [%.2f MiB/second]\n",
+		duration, totalFilesProcessed, totalBytesProcessed, mbPerSecond)
+
 } //main()
