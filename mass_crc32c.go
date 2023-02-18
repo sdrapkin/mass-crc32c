@@ -83,7 +83,6 @@ func CRCReader(work *job, buffer []byte) (string, error) {
 } //CRCReader()
 
 func fileHandler(jobId int, bufferSizeKB int, jobStats []jobStat) error {
-	g_waitGroup.Add(1)
 	defer g_waitGroup.Add(-1)
 
 	fileReadBuffer := make([]byte, 1024*bufferSizeKB)
@@ -201,6 +200,7 @@ func main() {
 
 	// create the coroutines
 	for jobId := 0; jobId < workerCount; jobId++ {
+		g_waitGroup.Add(1)
 		go fileHandler(jobId, bufferSizeKB, jobStats)
 	}
 
