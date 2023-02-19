@@ -199,8 +199,8 @@ func main() {
 	start := time.Now()
 
 	// create the coroutines
+	g_waitGroup.Add(workerCount)
 	for jobId := 0; jobId < workerCount; jobId++ {
-		g_waitGroup.Add(1)
 		go fileHandler(jobId, bufferSizeKB, jobStats)
 	}
 
