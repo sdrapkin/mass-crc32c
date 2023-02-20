@@ -32,7 +32,7 @@ type jobStat struct {
 }
 
 var (
-	g_jobQueue    chan *job
+	g_jobQueue    chan job
 	g_crc32cTable *crc32.Table
 	g_waitGroup   sync.WaitGroup
 )
@@ -41,7 +41,7 @@ func printErr(path string, err error) {
 	fmt.Fprintf(os.Stderr, "error: '%s': %v\n", path, err)
 } //printErr()
 
-func CRCReader(work *job, buffer []byte) (string, error) {
+func CRCReader(work job, buffer []byte) (string, error) {
 	file, err := os.Open(work.path)
 	if err != nil {
 		printErr(work.path, err)
@@ -139,7 +139,7 @@ func enqueueJob(path string, info os.FileInfo, err error) error {
 		fmt.Fprintf(os.Stderr, "ignoring: %s\n", path)
 		return nil
 	}
-	g_jobQueue <- &job{path: path, size: info.Size()} // add new file job to the queue (blocking when queue is full)
+	g_jobQueue <- job{path: path, size: info.Size()} // add new file job to the queue (blocking when queue is full)
 	return nil
 } //enqueueJob()
 
@@ -191,8 +191,8 @@ func main() {
 	}
 	fmt.Fprintf(os.Stderr, "Flags: [p=%d j=%d l=%d s=%d)]\n", cpuCount, workerCount, listAheadSize, bufferSizeKB)
 
-	runtime.GOMAXPROCS(cpuCount)                // limit number of kernel threads (CPUs used)
-	g_jobQueue = make(chan *job, listAheadSize) // use a channel with a size to limit the number of list ahead path
+	runtime.GOMAXPROCS(cpuCount)               // limit number of kernel threads (CPUs used)
+	g_jobQueue = make(chan job, listAheadSize) // use a channel with a size to limit the number of list ahead path
 
 	jobStats := make([]jobStat, workerCount)
 
