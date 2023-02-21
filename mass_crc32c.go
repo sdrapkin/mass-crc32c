@@ -34,7 +34,6 @@ type jobStat struct {
 var (
 	g_jobQueue    chan job
 	g_crc32cTable *crc32.Table
-	g_waitGroup   sync.WaitGroup
 )
 
 func printErr(path string, err error) {
@@ -83,8 +82,6 @@ func CRCReader(work job, buffer []byte) (string, error) {
 } //CRCReader()
 
 func fileHandler(jobId int, bufferSizeKB int, jobStats []jobStat) error {
-	defer g_waitGroup.Add(-1)
-
 	fileReadBuffer := make([]byte, 1024*bufferSizeKB)
 	var stdoutBuffer bytes.Buffer
 	batchCounter := uint8(0) // batches of 256
@@ -195,13 +192,17 @@ func main() {
 	g_jobQueue = make(chan job, listAheadSize) // use a channel with a size to limit the number of list ahead path
 
 	jobStats := make([]jobStat, workerCount)
+	waitGroup := sync.WaitGroup{}
 
 	start := time.Now()
 
 	// create the coroutines
-	g_waitGroup.Add(workerCount)
+	waitGroup.Add(workerCount)
 	for jobId := 0; jobId < workerCount; jobId++ {
-		go fileHandler(jobId, bufferSizeKB, jobStats)
+		go func(jobId int) {
+			defer waitGroup.Done()
+			fileHandler(jobId, bufferSizeKB, jobStats)
+		}(jobId)
 	}
 
 	// enqueue jobs
@@ -213,7 +214,7 @@ func main() {
 	} //for
 	close(g_jobQueue) // safe to close, since all jobs have already been channel-received by now
 
-	g_waitGroup.Wait()
+	waitGroup.Wait()
 	duration := time.Since(start)
 
 	var totalFilesProcessed, totalBytesProcessed int64
