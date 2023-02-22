@@ -29,6 +29,7 @@ type job struct {
 type jobStat struct {
 	bytesProcessed int64
 	filesProcessed int64
+	_              [8 - 2]int64 // padding to 64-byte cache line
 }
 
 var (
