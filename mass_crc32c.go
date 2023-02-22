@@ -220,12 +220,12 @@ func main() {
 
 	var totalFilesProcessed, totalBytesProcessed int64
 	for _, item := range jobStats {
-		totalFilesProcessed += (item.filesProcessed)
-		totalBytesProcessed += (item.bytesProcessed)
+		totalFilesProcessed += item.filesProcessed
+		totalBytesProcessed += item.bytesProcessed
 	}
+
 	var mbPerSecond float64 = (float64(totalBytesProcessed) / (1024 * 1024)) / duration.Seconds()
 	printer := message.NewPrinter(language.English)
 	printer.Fprintf(os.Stderr, "[Duration: %v] [Files processed: %v] [Bytes processed: %v] [%.2f MiB/second]\n",
 		duration, totalFilesProcessed, totalBytesProcessed, mbPerSecond)
-
 } //main()
