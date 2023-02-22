@@ -29,7 +29,6 @@ type job struct {
 type jobStat struct {
 	bytesProcessed int64
 	filesProcessed int64
-	_              [8 - 2]int64 // padding to 64-byte cache line
 }
 
 var (
@@ -41,10 +40,10 @@ func printErr(path string, err error) {
 	fmt.Fprintf(os.Stderr, "error: '%s': %v\n", path, err)
 } //printErr()
 
-func CRCReader(work job, buffer []byte) (string, error) {
-	file, err := os.Open(work.path)
+func CRCReader(j job, buffer []byte) (string, error) {
+	file, err := os.Open(j.path)
 	if err != nil {
-		printErr(work.path, err)
+		printErr(j.path, err)
 		return "", err
 	}
 	defer file.Close()
@@ -65,17 +64,20 @@ func CRCReader(work job, buffer []byte) (string, error) {
 				checksum = crc32.Update(checksum, g_crc32cTable, buffer[:n])
 			}
 		case io.EOF: // runs once
-			if work.size != processedSize {
+			if j.size != processedSize {
 				return "", errors.New("fileInfoSize != processedSize")
 			}
 
 			const checksumByteSize = crc32.Size
 			const checksumBase64Size = ((checksumByteSize-1)/3)*4 + 4
 
-			binary.BigEndian.PutUint32(buffer[0:checksumByteSize], checksum)
-			base64.StdEncoding.Encode(buffer[checksumByteSize:checksumByteSize+checksumBase64Size], buffer[0:checksumByteSize])
+			checksumBufferSlice := buffer[0:checksumByteSize]
+			encodedBufferSlice := buffer[checksumByteSize : checksumByteSize+checksumBase64Size]
 
-			return string(buffer[checksumByteSize : checksumByteSize+checksumBase64Size]), nil
+			binary.BigEndian.PutUint32(checksumBufferSlice, checksum)
+			base64.StdEncoding.Encode(encodedBufferSlice, checksumBufferSlice)
+
+			return string(encodedBufferSlice), nil
 		default: // should never run
 			return "ERROR!", err
 		} //switch
@@ -89,16 +91,17 @@ func fileHandler(jobId int, bufferSizeKB int, jobStats []jobStat) error {
 
 	localJobStat := jobStat{}
 
-	for work := range g_jobQueue { // consume the messages in the queue
+	for j := range g_jobQueue { // consume the messages in the queue
 
-		crc, err := CRCReader(work, fileReadBuffer)
+		crc, err := CRCReader(j, fileReadBuffer)
 		if err != nil {
-			printErr(work.path, err)
+			printErr(j.path, err)
 			continue
 		}
 		batchCounter++
-		localJobStat.bytesProcessed += work.size
-		fmt.Fprintf(&stdoutBuffer, "%s %016x %s\n", crc, work.size, work.path)
+		localJobStat.bytesProcessed += j.size
+
+		fmt.Fprintf(&stdoutBuffer, "%s %016x %s\n", crc, j.size, j.path)
 
 		if batchCounter == 0 { // byte wrap-around
 			os.Stdout.Write(stdoutBuffer.Bytes())
@@ -130,7 +133,7 @@ func enqueueJob(path string, info os.FileInfo, err error) error {
 		return nil
 	}
 	if fileMode.IsDir() {
-		os.Stderr.Write([]byte(fmt.Sprintf("entering dir: %s\n", path)))
+		os.Stderr.WriteString("entering dir: " + path + "\n")
 		return nil
 	}
 	if !fileMode.IsRegular() {
