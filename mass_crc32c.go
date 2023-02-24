@@ -37,7 +37,7 @@ var (
 )
 
 func printErr(path string, err error) {
-	fmt.Fprintf(os.Stderr, "error: '%s': %v\n", path, err)
+	os.Stderr.WriteString("CRC error: '" + path + "' : " + err.Error() + "\n")
 } //printErr()
 
 func CRCReader(j job, buffer []byte) (string, error) {
@@ -101,7 +101,8 @@ func fileHandler(jobId int, bufferSizeKB int, jobStats []jobStat) error {
 		batchCounter++
 		localJobStat.bytesProcessed += j.size
 
-		fmt.Fprintf(&stdoutBuffer, "%s %016x %s\n", crc, j.size, j.path)
+		jobFileSize := j.size
+		stdoutBuffer.WriteString(crc + fmt.Sprintf(" %016x ", jobFileSize) + j.path + "\n")
 
 		if batchCounter == 0 { // byte wrap-around
 			os.Stdout.Write(stdoutBuffer.Bytes())
@@ -120,24 +121,24 @@ func fileHandler(jobId int, bufferSizeKB int, jobStats []jobStat) error {
 } //fileHandler()
 
 func enqueueJob(path string, info os.FileInfo, err error) error {
-	fileMode := info.Mode()
-
 	if err != nil {
-		var nodeType string
-		if fileMode.IsDir() {
-			nodeType = "dir:"
+		nodeType := ""
+		if info != nil && info.Mode().IsDir() {
+			nodeType = "dir: "
 		} else {
-			nodeType = "file:"
+			nodeType = "file: "
 		}
-		fmt.Fprintf(os.Stderr, "%s error: '%s': %v\n", nodeType, path, err)
+		os.Stderr.WriteString(nodeType + "error: '" + path + "': " + err.Error() + "\n")
 		return nil
 	}
+
+	fileMode := info.Mode()
 	if fileMode.IsDir() {
 		os.Stderr.WriteString("entering dir: " + path + "\n")
 		return nil
 	}
 	if !fileMode.IsRegular() {
-		fmt.Fprintf(os.Stderr, "ignoring: %s\n", path)
+		os.Stderr.WriteString("ignoring: " + path + "\n")
 		return nil
 	}
 	g_jobQueue <- job{path: path, size: info.Size()} // add new file job to the queue (blocking when queue is full)
