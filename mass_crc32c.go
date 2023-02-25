@@ -44,7 +44,6 @@ func printErr(path string, err error) {
 func CRCReader(j job, buffer []byte, bufferSize int) (string, error) {
 	file, err := os.Open(j.path)
 	if err != nil {
-		printErr(j.path, err)
 		return "", err
 	}
 	defer file.Close()
