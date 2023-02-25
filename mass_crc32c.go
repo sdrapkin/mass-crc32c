@@ -95,6 +95,7 @@ func fileHandler(jobId int, bufferSizeKB int, jobStats []jobStat) error {
 			printErr(j.path, err)
 			continue
 		}
+
 		batchCounter++
 		jobFileSize := j.size
 		localJobStat.bytesProcessed += jobFileSize
