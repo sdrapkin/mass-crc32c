@@ -189,7 +189,10 @@ func main() {
 		printUsage()
 		os.Exit(1)
 	}
-	fmt.Fprintf(os.Stderr, "Flags: [p=%d j=%d l=%d s=%d)]\n", cpuCount, workerCount, listAheadSize, bufferSizeKB)
+
+	printFlags := func() {
+		fmt.Fprintf(os.Stderr, "Flags: [p=%d j=%d l=%d s=%d)]\n", cpuCount, workerCount, listAheadSize, bufferSizeKB)
+	}
 
 	runtime.GOMAXPROCS(cpuCount)               // limit number of kernel threads (CPUs used)
 	g_jobQueue = make(chan job, listAheadSize) // use a channel with a size to limit the number of list ahead path
@@ -228,6 +231,8 @@ func main() {
 
 	var mbPerSecond float64 = (float64(totalBytesProcessed) / (1024 * 1024)) / duration.Seconds()
 	printer := message.NewPrinter(language.English)
+
+	printFlags()
 	printer.Fprintf(os.Stderr, "[Duration: %v] [Files processed: %v] [Bytes processed: %v] [%.2f MiB/second]\n",
 		duration, totalFilesProcessed, totalBytesProcessed, mbPerSecond)
 } //main()
