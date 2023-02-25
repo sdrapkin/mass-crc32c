@@ -69,7 +69,7 @@ func CRCReader(j job, buffer []byte) (string, error) {
 			}
 
 			const checksumByteSize = crc32.Size
-			const checksumBase64Size = ((checksumByteSize-1)/3)*4 + 4
+			const checksumBase64Size = (checksumByteSize + 2) / 3 * 4
 
 			checksumBufferSlice := buffer[0:checksumByteSize]
 			encodedBufferSlice := buffer[checksumByteSize : checksumByteSize+checksumBase64Size]
@@ -86,22 +86,20 @@ func CRCReader(j job, buffer []byte) (string, error) {
 
 func fileHandler(jobId int, bufferSizeKB int, jobStats []jobStat) error {
 	fileReadBuffer := make([]byte, 1024*bufferSizeKB)
-	var stdoutBuffer bytes.Buffer
+	stdoutBuffer := bytes.Buffer{}
 	batchCounter := uint8(0) // batches of 256
-
 	localJobStat := jobStat{}
 
 	for j := range g_jobQueue { // consume the messages in the queue
-
 		crc, err := CRCReader(j, fileReadBuffer)
 		if err != nil {
 			printErr(j.path, err)
 			continue
 		}
 		batchCounter++
-		localJobStat.bytesProcessed += j.size
-
 		jobFileSize := j.size
+		localJobStat.bytesProcessed += jobFileSize
+
 		stdoutBuffer.WriteString(crc + fmt.Sprintf(" %016x ", jobFileSize) + j.path + "\n")
 
 		if batchCounter == 0 { // byte wrap-around
