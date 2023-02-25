@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"sync"
 	"time"
+	"unsafe"
 
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
@@ -40,7 +41,7 @@ func printErr(path string, err error) {
 	os.Stderr.WriteString("CRC error: '" + path + "' : " + err.Error() + "\n")
 } //printErr()
 
-func CRCReader(j job, buffer []byte) (string, error) {
+func CRCReader(j job, buffer []byte, bufferSize int) (string, error) {
 	file, err := os.Open(j.path)
 	if err != nil {
 		printErr(j.path, err)
@@ -50,8 +51,6 @@ func CRCReader(j job, buffer []byte) (string, error) {
 
 	checksum := uint32(0)
 	processedSize := int64(0)
-
-	bufferSize := len(buffer)
 
 	for {
 		switch n, err := file.Read(buffer); err {
@@ -85,13 +84,14 @@ func CRCReader(j job, buffer []byte) (string, error) {
 } //CRCReader()
 
 func fileHandler(jobId int, bufferSizeKB int, jobStats []jobStat) error {
-	fileReadBuffer := make([]byte, 1024*bufferSizeKB)
+	fileReadBufferSize := 1024 * bufferSizeKB
+	fileReadBuffer := make([]byte, fileReadBufferSize)
 	stdoutBuffer := bytes.Buffer{}
 	batchCounter := uint8(0) // batches of 256
 	localJobStat := jobStat{}
 
 	for j := range g_jobQueue { // consume the messages in the queue
-		crc, err := CRCReader(j, fileReadBuffer)
+		crc, err := CRCReader(j, fileReadBuffer, fileReadBufferSize)
 		if err != nil {
 			printErr(j.path, err)
 			continue
@@ -132,7 +132,8 @@ func enqueueJob(path string, info os.FileInfo, err error) error {
 
 	fileMode := info.Mode()
 	if fileMode.IsDir() {
-		os.Stderr.WriteString("entering dir: " + path + "\n")
+		str := "entering dir: " + path + "\n"
+		os.Stderr.Write(unsafe.Slice(unsafe.StringData(str), len(str)))
 		return nil
 	}
 	if !fileMode.IsRegular() {
