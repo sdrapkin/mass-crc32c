@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
@@ -150,18 +151,38 @@ func init() {
 }
 
 func sanityCheck() {
-	const data = "861844d6704e8573fec34d967e20bcfef3d424cf48be04e6dc08f2bd58c729743371015ead891cc3cf1c9d34b49264b510751b1ff9e537937bc46b5d6ff4ecc8" // sha512("Hello World!")
-	const expectedCorrectChecksum = "C7DdPQ=="
-
-	calculatedChecksum := crc32.Update(uint32(0), g_crc32cTable, []byte(data))
 	slice4 := make([]byte, 4)
-	binary.BigEndian.PutUint32(slice4, calculatedChecksum)
-	calculatedChecksumBase64 := base64.StdEncoding.EncodeToString(slice4)
-	if expectedCorrectChecksum != calculatedChecksumBase64 {
-		fmt.Fprintf(os.Stderr, "Sanity Check failed! [expected: %s, calculated: %s]. Terminating.\n",
-			expectedCorrectChecksum, calculatedChecksumBase64)
-		os.Exit(2)
-	}
+	func() {
+		const data = "861844d6704e8573fec34d967e20bcfef3d424cf48be04e6dc08f2bd58c729743371015ead891cc3cf1c9d34b49264b510751b1ff9e537937bc46b5d6ff4ecc8" // sha512("Hello World!")
+		const expectedCorrectChecksum = "C7DdPQ=="
+
+		calculatedChecksum := crc32.Update(uint32(0), g_crc32cTable, []byte(data))
+		binary.BigEndian.PutUint32(slice4, calculatedChecksum)
+		calculatedChecksumBase64 := base64.StdEncoding.EncodeToString(slice4)
+		if expectedCorrectChecksum != calculatedChecksumBase64 {
+			fmt.Fprintf(os.Stderr, "Sanity Check #1 failed! [expected: %s, calculated: %s]. Terminating.\n",
+				expectedCorrectChecksum, calculatedChecksumBase64)
+			os.Exit(2)
+		}
+	}() // sanity check 1
+
+	func() {
+		const constantCRC32C = "0x48674bc7"
+
+		randomBytes := make([]byte, 64)
+		rand.Read(randomBytes)
+
+		calculatedChecksum := crc32.Update(uint32(0), g_crc32cTable, randomBytes)
+		binary.LittleEndian.PutUint32(slice4, calculatedChecksum)
+		calculatedChecksum = crc32.Update(calculatedChecksum, g_crc32cTable, slice4)
+
+		calculatedChecksumHex := fmt.Sprintf("%#x", calculatedChecksum)
+		if calculatedChecksumHex != constantCRC32C {
+			fmt.Fprintf(os.Stderr, "Sanity Check #2 failed! [expected:  %s, calculated %s]. Terminating.\n",
+				constantCRC32C, calculatedChecksumHex)
+			os.Exit(2)
+		}
+	}() // sanity check 2
 } //sanityCheck()
 
 func printUsage() {
