@@ -17,7 +17,6 @@ import (
 	"runtime"
 	"sync"
 	"time"
-	"unsafe"
 
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
@@ -39,7 +38,7 @@ var (
 )
 
 func printErr(path string, err error) {
-	os.Stderr.WriteString("CRC error: '" + path + "' : " + err.Error() + "\n")
+	os.Stderr.WriteString("File Open error: '" + path + "' : " + err.Error() + "\n")
 } //printErr()
 
 func CRCReader(j job, buffer []byte, bufferSize int) (string, error) {
@@ -98,10 +97,9 @@ func fileHandler(jobId int, bufferSizeKB int, jobStats []jobStat) error {
 		}
 
 		batchCounter++
-		jobFileSize := j.size
-		localJobStat.bytesProcessed += jobFileSize
+		localJobStat.bytesProcessed += j.size
 
-		stdoutBuffer.WriteString(crc + fmt.Sprintf(" %016x ", jobFileSize) + j.path + "\n")
+		stdoutBuffer.WriteString(crc + fmt.Sprintf(" %016x ", j.size) + j.path + "\n")
 
 		if batchCounter == 0 { // byte wrap-around
 			os.Stdout.Write(stdoutBuffer.Bytes())
@@ -122,7 +120,7 @@ func fileHandler(jobId int, bufferSizeKB int, jobStats []jobStat) error {
 func enqueueJob(path string, info os.FileInfo, err error) error {
 	if err != nil {
 		nodeType := ""
-		if info != nil && info.Mode().IsDir() {
+		if info != nil && info.IsDir() {
 			nodeType = "dir: "
 		} else {
 			nodeType = "file: "
@@ -131,13 +129,12 @@ func enqueueJob(path string, info os.FileInfo, err error) error {
 		return nil
 	}
 
-	fileMode := info.Mode()
-	if fileMode.IsDir() {
-		str := "entering dir: " + path + "\n"
-		os.Stderr.Write(unsafe.Slice(unsafe.StringData(str), len(str)))
+	if info.IsDir() {
+		//str := "entering dir: " + path + "\n"
+		//os.Stderr.Write(unsafe.Slice(unsafe.StringData(str), len(str)))
 		return nil
 	}
-	if !fileMode.IsRegular() {
+	if !info.Mode().IsRegular() {
 		os.Stderr.WriteString("ignoring: " + path + "\n")
 		return nil
 	}
