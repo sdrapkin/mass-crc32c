@@ -23,8 +23,8 @@ import (
 ) //import
 
 type job struct {
-	path string
-	size int64
+	path     string
+	fileSize int64
 } //job struct
 
 type jobStat struct {
@@ -33,8 +33,8 @@ type jobStat struct {
 }
 
 var (
-	g_jobQueue    chan job
-	g_crc32cTable *crc32.Table
+	g_jobQueueChan chan job
+	g_crc32cTable  *crc32.Table
 )
 
 func printErr(path string, err error) {
@@ -62,7 +62,7 @@ func CRCReader(j job, buffer []byte, bufferSize int) (string, error) {
 				checksum = crc32.Update(checksum, g_crc32cTable, buffer[:n])
 			}
 		case io.EOF: // runs once
-			if j.size != processedSize {
+			if j.fileSize != processedSize {
 				return "", errors.New("fileInfoSize != processedSize")
 			}
 
@@ -89,7 +89,7 @@ func fileHandler(jobId int, bufferSizeKB int, jobStats []jobStat) error {
 	batchCounter := uint8(0) // batches of 256
 	localJobStat := jobStat{}
 
-	for j := range g_jobQueue { // consume the messages in the queue
+	for j := range g_jobQueueChan { // consume the messages in the queue
 		crc, err := CRCReader(j, fileReadBuffer, fileReadBufferSize)
 		if err != nil {
 			printErr(j.path, err)
@@ -97,9 +97,9 @@ func fileHandler(jobId int, bufferSizeKB int, jobStats []jobStat) error {
 		}
 
 		batchCounter++
-		localJobStat.bytesProcessed += j.size
+		localJobStat.bytesProcessed += j.fileSize
 
-		stdoutBuffer.WriteString(crc + fmt.Sprintf(" %016x ", j.size) + j.path + "\n")
+		stdoutBuffer.WriteString(crc + fmt.Sprintf(" %016x ", j.fileSize) + j.path + "\n")
 
 		if batchCounter == 0 { // byte wrap-around
 			os.Stdout.Write(stdoutBuffer.Bytes())
@@ -117,6 +117,7 @@ func fileHandler(jobId int, bufferSizeKB int, jobStats []jobStat) error {
 	return nil
 } //fileHandler()
 
+// os.FileInfo is an interface
 func enqueueJob(path string, info os.FileInfo, err error) error {
 	if err != nil {
 		nodeType := ""
@@ -138,7 +139,7 @@ func enqueueJob(path string, info os.FileInfo, err error) error {
 		os.Stderr.WriteString("ignoring: " + path + "\n")
 		return nil
 	}
-	g_jobQueue <- job{path: path, size: info.Size()} // add new file job to the queue (blocking when queue is full)
+	g_jobQueueChan <- job{path: path, fileSize: info.Size()} // add new file job to the queue (blocking when queue is full)
 	return nil
 } //enqueueJob()
 
@@ -167,7 +168,7 @@ func sanityCheck() {
 		const constantCRC32C = "0x48674bc7"
 
 		randomBytes := make([]byte, 64)
-		rand.Read(randomBytes)
+		rand.Reader.Read(randomBytes)
 
 		calculatedChecksum := crc32.Update(uint32(0), g_crc32cTable, randomBytes)
 		binary.LittleEndian.PutUint32(slice4, calculatedChecksum)
@@ -210,18 +211,18 @@ func main() {
 	}
 
 	printFlags := func() {
-		fmt.Fprintf(os.Stderr, "Flags: [p=%d j=%d l=%d s=%d)]\n", cpuCount, workerCount, listAheadSize, bufferSizeKB)
+		fmt.Fprintf(os.Stderr, "Flags: [p=%d j=%d l=%d s=%d]\n", cpuCount, workerCount, listAheadSize, bufferSizeKB)
 	}
 
-	runtime.GOMAXPROCS(cpuCount)               // limit number of kernel threads (CPUs used)
-	g_jobQueue = make(chan job, listAheadSize) // use a channel with a size to limit the number of list ahead path
+	runtime.GOMAXPROCS(cpuCount)                   // limit number of kernel threads (CPUs used)
+	g_jobQueueChan = make(chan job, listAheadSize) // use a channel with a size to limit the number of list ahead path
 
 	jobStats := make([]jobStat, workerCount)
 	waitGroup := sync.WaitGroup{}
 
 	start := time.Now()
 
-	// create the coroutines
+	// create the fileHandler worker goroutines
 	waitGroup.Add(workerCount)
 	for jobId := 0; jobId < workerCount; jobId++ {
 		go func(jobId int) {
@@ -237,7 +238,7 @@ func main() {
 			log.Fatal(err)
 		}
 	} //for
-	close(g_jobQueue) // safe to close, since all jobs have already been channel-received by now
+	close(g_jobQueueChan) // safe to close, since all jobs have already been channel-received by now
 
 	waitGroup.Wait()
 	duration := time.Since(start)
