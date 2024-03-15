@@ -118,7 +118,7 @@ func fileHandler(jobId int, bufferSizeKB int, jobStats []jobStat) error {
 } //fileHandler()
 
 // os.FileInfo is an interface
-func enqueueJob(path string, info os.FileInfo, err error) error {
+var enqueueJob filepath.WalkFunc = func(path string, info os.FileInfo, err error) error {
 	if err != nil {
 		nodeType := ""
 		if info != nil && info.IsDir() {
